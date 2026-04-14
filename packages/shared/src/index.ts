@@ -4,5 +4,4 @@
  */
 export * from "./types";
 export * from "./db";
-export * from "./claude";
 export * from "./gemini";
