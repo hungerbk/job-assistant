@@ -50,21 +50,37 @@ export async function sendEmailNotification(
 }
 
 /**
+ * HTML 특수문자를 이스케이프합니다.
+ * 외부 데이터(크롤링 결과, AI 응답)를 HTML에 삽입할 때 XSS를 방지합니다.
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
  * 이메일 본문 HTML을 생성합니다.
  */
 function buildEmailHtml(job: RawJobPosting, match: MatchResult): string {
   const matchList =
     match.match_reasons.length > 0
-      ? match.match_reasons.map((r: string) => `<li>${r}</li>`).join("")
+      ? match.match_reasons.map((r: string) => `<li>${escapeHtml(r)}</li>`).join("")
       : "<li>없음</li>";
 
   const mismatchList =
     match.mismatch_reasons.length > 0
-      ? match.mismatch_reasons.map((r: string) => `<li>${r}</li>`).join("")
+      ? match.mismatch_reasons.map((r: string) => `<li>${escapeHtml(r)}</li>`).join("")
       : "<li>없음</li>";
 
+  const company = escapeHtml(job.company);
+  const position = escapeHtml(job.position);
+  const url = escapeHtml(job.url);
+
   return `
-<h2>📌 [${job.company}] ${job.position}</h2>
+<h2>📌 [${company}] ${position}</h2>
 <p><strong>매칭 점수: ${match.score}점</strong></p>
 
 <h3>✅ 매칭 이유</h3>
@@ -73,6 +89,6 @@ function buildEmailHtml(job: RawJobPosting, match: MatchResult): string {
 <h3>❌ 미스매치</h3>
 <ul>${mismatchList}</ul>
 
-<p><a href="${job.url}">공고 바로가기</a></p>
+<p><a href="${url}">공고 바로가기</a></p>
 `.trim();
 }
