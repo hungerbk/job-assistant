@@ -97,11 +97,20 @@ async function fetchListings(): Promise<WantedListItem[]> {
 
   const response = await fetch(`${LIST_API}?${params}`, { headers: HEADERS });
 
+  console.log(`[원티드] 목록 API 응답 상태: ${response.status}`);
+
   if (!response.ok) {
-    throw new Error(`원티드 목록 API 오류: ${response.status} ${response.statusText}`);
+    const body = await response.text();
+    throw new Error(`원티드 목록 API 오류: ${response.status}\n${body.slice(0, 300)}`);
   }
 
   const json = (await response.json()) as WantedListResponse;
+
+  // 실제 응답 구조 확인용 (첫 실행 시 디버깅)
+  const keys = Object.keys(json as object);
+  console.log(`[원티드] 응답 최상위 키: [${keys.join(", ")}]`);
+  console.log(`[원티드] data 배열 길이: ${(json.data ?? []).length}`);
+
   return json.data ?? [];
 }
 
