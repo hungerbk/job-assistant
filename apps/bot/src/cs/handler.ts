@@ -19,6 +19,7 @@ import {
   pickRandom,
 } from "./questions";
 import type { CSCategory, CSQuestion } from "./questions";
+import { notifyError } from "../utils/error-notify";
 
 /** 카테고리별 이모지 */
 const CATEGORY_EMOJI: Record<CSCategory, string> = {
@@ -117,7 +118,7 @@ export function registerCSHandlers(app: App): void {
         });
       }
     } catch (err) {
-      console.error("[CS] cs_show_answer 오류:", err);
+      await notifyError("cs_show_answer", err);
       await respond("답변을 불러오는 중 오류가 발생했습니다.").catch(() => {});
     }
   });
@@ -154,7 +155,7 @@ export function registerCSHandlers(app: App): void {
         });
       }
     } catch (err) {
-      console.error("[CS] cs_next_question 오류:", err);
+      await notifyError("cs_next_question", err);
     }
   });
 }

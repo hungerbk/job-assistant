@@ -11,6 +11,7 @@ import { registerActionHandlers } from "./actions/handler";
 import { registerInterviewHandlers } from "./interview/handler";
 import { registerCoverletterHandlers } from "./resume/handler";
 import { registerCSHandlers } from "./cs/handler";
+import { notifyError } from "./utils/error-notify";
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -31,6 +32,11 @@ registerCoverletterHandlers(app);
 
 // CS 질문 핸들러 등록
 registerCSHandlers(app);
+
+// 전역 에러 핸들러 — 각 핸들러에서 처리되지 않은 에러를 Slack으로 알림
+app.error(async (error) => {
+  await notifyError("전역 에러 핸들러", error);
+});
 
 (async () => {
   const port = Number(process.env.PORT) || 3000;
