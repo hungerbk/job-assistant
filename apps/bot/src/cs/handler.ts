@@ -7,12 +7,13 @@
  *   /cs 목록        — 카테고리 목록 표시
  *
  * 버튼:
- *   [답변 보기]  — 현재 질문의 답변 공개 (메시지 업데이트)
- *   [다음 문제]  — 같은 카테고리에서 새 질문 (메시지 업데이트)
+ *   [답변 보기]  — 현재 질문의 답변 공개 (client.chat.update로 메시지 수정)
+ *   [다음 문제]  — 같은 카테고리에서 새 질문 (client.chat.update로 메시지 수정)
  */
 import type { App } from "@slack/bolt";
 import {
   CS_CATEGORIES,
+  CS_QUESTIONS,
   getQuestionsByCategory,
   parseCategory,
   pickRandom,
@@ -79,40 +80,82 @@ export function registerCSHandlers(app: App): void {
   });
 
   // "답변 보기" 버튼 액션
-  app.action("cs_show_answer", async ({ body, ack, respond }) => {
+  // respond() 대신 client.chat.update() 사용 — response_url 만료/횟수 제한 우회
+  app.action("cs_show_answer", async ({ body, ack, client, respond }) => {
     await ack();
 
-    const questionId = getActionValue(body);
-    if (!questionId) return;
+    try {
+      const questionId = getActionValue(body);
+      if (!questionId) {
+        console.warn("[CS] cs_show_answer: questionId 없음");
+        return;
+      }
 
-    const question = CS_QUESTIONS.find((q) => q.id === questionId);
-    if (!question) return;
+      const question = CS_QUESTIONS.find((q) => q.id === questionId);
+      if (!question) {
+        console.warn(`[CS] cs_show_answer: id=${questionId} 질문 없음`);
+        await respond("질문을 찾을 수 없습니다.").catch(() => {});
+        return;
+      }
 
-    await respond({
-      replace_original: true,
-      blocks: buildAnswerBlocks(question),
-      text: `[${question.category}] ${question.question}`,
-    });
+      const channel = getChannelId(body);
+      const ts = getMessageTs(body);
+
+      if (channel && ts) {
+        await client.chat.update({
+          channel,
+          ts,
+          blocks: buildAnswerBlocks(question),
+          text: `[${question.category}] ${question.question}`,
+        });
+      } else {
+        // channel/ts를 못 가져온 경우 respond로 폴백
+        await respond({
+          replace_original: true,
+          blocks: buildAnswerBlocks(question),
+          text: `[${question.category}] ${question.question}`,
+        });
+      }
+    } catch (err) {
+      console.error("[CS] cs_show_answer 오류:", err);
+      await respond("답변을 불러오는 중 오류가 발생했습니다.").catch(() => {});
+    }
   });
 
   // "다음 문제" 버튼 액션
-  app.action("cs_next_question", async ({ body, ack, respond }) => {
+  app.action("cs_next_question", async ({ body, ack, client, respond }) => {
     await ack();
 
-    const category = getActionValue(body) as CSCategory | "random" | null;
+    try {
+      const value = getActionValue(body) as CSCategory | "random" | null;
 
-    const pool = getQuestionsByCategory(
-      category && category !== "random" ? category : undefined
-    );
-    const question = pickRandom(pool);
+      const pool = getQuestionsByCategory(
+        value && value !== "random" ? value : undefined
+      );
+      const question = pickRandom(pool);
 
-    if (!question) return;
+      if (!question) return;
 
-    await respond({
-      replace_original: true,
-      blocks: buildQuestionBlocks(question),
-      text: `[${question.category}] ${question.question}`,
-    });
+      const channel = getChannelId(body);
+      const ts = getMessageTs(body);
+
+      if (channel && ts) {
+        await client.chat.update({
+          channel,
+          ts,
+          blocks: buildQuestionBlocks(question),
+          text: `[${question.category}] ${question.question}`,
+        });
+      } else {
+        await respond({
+          replace_original: true,
+          blocks: buildQuestionBlocks(question),
+          text: `[${question.category}] ${question.question}`,
+        });
+      }
+    } catch (err) {
+      console.error("[CS] cs_next_question 오류:", err);
+    }
   });
 }
 
@@ -211,11 +254,21 @@ function buildAnswerBlocks(q: CSQuestion) {
 // 내부 유틸리티
 // ---------------------------------------------------------------------------
 
-import { CS_QUESTIONS } from "./questions";
-
 function getActionValue(
   body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
 ): string | null {
   const actions = (body as { actions?: Array<{ value?: string }> }).actions;
   return actions?.[0]?.value ?? null;
+}
+
+function getChannelId(
+  body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
+): string | null {
+  return (body as { channel?: { id?: string } }).channel?.id ?? null;
+}
+
+function getMessageTs(
+  body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
+): string | null {
+  return (body as { message?: { ts?: string } }).message?.ts ?? null;
 }
