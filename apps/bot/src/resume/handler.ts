@@ -5,7 +5,7 @@
  *   /coverletter [회사명]  — 자소서 작성 시작
  *   /analyze              — JD 분석 + 강조할 경험 추천
  *   /draft                — 자소서 초안 생성
- *   /feedback             — 현재 초안 피드백
+ *   /clfeedback           — 현재 초안 피드백
  */
 import type { App } from "@slack/bolt";
 import { sendMessage } from "@job-assistant/shared";
@@ -77,7 +77,7 @@ export function registerCoverletterHandlers(app: App): void {
         : "\n\n자소서 문항 없음 — 자유 형식으로 작성합니다.";
 
     await respond(
-      `✅ *[${company}]* 자소서 작성을 시작합니다!${questionsText}\n\n${intro}\n\n> \`/analyze\` JD 분석  |  \`/draft\` 초안 생성  |  \`/feedback\` 피드백`
+      `✅ *[${company}]* 자소서 작성을 시작합니다!${questionsText}\n\n${intro}\n\n> \`/analyze\` JD 분석  |  \`/draft\` 초안 생성  |  \`/clfeedback\` 피드백`
     );
 
     // intro를 draft의 첫 feedback으로 저장 (히스토리 추적용)
@@ -152,12 +152,12 @@ export function registerCoverletterHandlers(app: App): void {
     }
 
     await respond(
-      `📝 *자소서 초안 v${draft.version + 1}*\n\n${draftText}\n\n> \`/feedback\` 피드백 요청  |  \`/draft\` 재생성`
+      `📝 *자소서 초안 v${draft.version + 1}*\n\n${draftText}\n\n> \`/clfeedback\` 피드백 요청  |  \`/draft\` 재생성`
     );
   });
 
-  // /feedback — 현재 초안 피드백
-  app.command("/feedback", async ({ command, ack, respond }) => {
+  // /clfeedback — 현재 초안 피드백 (/feedback은 Slack 기본 명령어와 충돌)
+  app.command("/clfeedback", async ({ command, ack, respond }) => {
     await ack();
 
     const slackUserId = command.user_id;
