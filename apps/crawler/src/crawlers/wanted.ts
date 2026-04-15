@@ -1,127 +1,137 @@
 /**
- * 원티드 채용 공고 크롤러 (Playwright 기반)
+ * 원티드 채용 공고 크롤러 (공개 REST API 기반)
  *
- * 대상: https://www.wanted.co.kr/jobs?job_sort=job.latest_order&years=-1&category=518
- * (프론트엔드 개발자, 전체 경력, 최신순)
+ * 이전 Playwright 방식에서 교체: 헤드리스 브라우저 감지 차단 및 선택자 불일치 문제 해결
  *
- * 수집 흐름:
- * 1. 목록 페이지에서 공고 카드(회사명, 포지션, URL) 수집
- * 2. 각 공고 상세 페이지 진입 → JD 본문 추출
+ * API 엔드포인트:
+ *   목록: GET https://www.wanted.co.kr/api/v4/jobs?category=518&...
+ *   상세: GET https://www.wanted.co.kr/api/v4/jobs/{id}
+ *
+ * category=518: 프론트엔드 개발자
  */
-import { chromium, type Browser, type Page } from "playwright";
 import type { RawJobPosting } from "./types";
 
-/** 원티드 프론트엔드 개발자 목록 URL */
-const LIST_URL =
-  "https://www.wanted.co.kr/jobs?job_sort=job.latest_order&years=-1&category=518";
+const BASE_URL = "https://www.wanted.co.kr";
+const LIST_API = `${BASE_URL}/api/v4/jobs`;
+const JOB_CATEGORY = 518; // 프론트엔드 개발자
 
-/** 목록 페이지에서 수집할 최대 공고 수 */
+/** 목록에서 수집할 최대 공고 수 */
 const MAX_LISTINGS = 20;
 
-/** 페이지 로드 대기 시간 (ms) */
-const PAGE_LOAD_WAIT_MS = 2_000;
+/** 상세 페이지 요청 사이 딜레이 (ms) — 서버 부하 방지 */
+const REQUEST_DELAY_MS = 500;
+
+/** API 요청 공통 헤더 */
+const HEADERS = {
+  accept: "application/json, text/plain, */*",
+  "accept-language": "ko",
+  "x-wanted-locale": "ko",
+  referer: `${BASE_URL}/`,
+  "user-agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+};
+
+interface WantedListItem {
+  id: number;
+  title: string;
+  company: { name: string };
+}
+
+interface WantedListResponse {
+  data: WantedListItem[];
+  links?: { next?: string };
+}
+
+interface WantedDetailResponse {
+  job: {
+    id: number;
+    title: string;
+    company: { name: string };
+    detail: {
+      main_tasks?: string;
+      requirements?: string;
+      preferred_points?: string;
+      benefits?: string;
+      intro?: string;
+    };
+  };
+}
 
 /**
- * 원티드에서 채용 공고 목록을 수집합니다.
- * Playwright로 브라우저를 실행하여 SPA 렌더링을 처리합니다.
+ * 원티드 공개 API로 프론트엔드 채용 공고를 수집합니다.
  */
 export async function crawlWanted(): Promise<RawJobPosting[]> {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const listings = await fetchListings(browser);
-    const results: RawJobPosting[] = [];
+  const listings = await fetchListings();
+  if (listings.length === 0) return [];
 
-    for (const listing of listings) {
-      const jd = await fetchJobDetail(browser, listing.url);
-      results.push({ ...listing, jd });
-    }
+  const results: RawJobPosting[] = [];
 
-    return results;
-  } finally {
-    await browser.close();
+  for (const item of listings) {
+    const jd = await fetchJobDetail(item.id);
+    results.push({
+      url: `${BASE_URL}/wd/${item.id}`,
+      company: item.company.name,
+      position: item.title,
+      jd,
+      source: "wanted",
+    });
+    // 서버 부하 방지 딜레이
+    await sleep(REQUEST_DELAY_MS);
   }
+
+  return results;
 }
 
 /**
- * 목록 페이지에서 공고 카드(회사명, 포지션, URL)를 수집합니다.
+ * 공고 목록 API를 호출합니다.
  */
-async function fetchListings(
-  browser: Browser
-): Promise<Omit<RawJobPosting, "jd">[]> {
-  const page = await browser.newPage();
-  await page.goto(LIST_URL, { waitUntil: "networkidle" });
+async function fetchListings(): Promise<WantedListItem[]> {
+  const params = new URLSearchParams({
+    country: "kr",
+    job_sort: "job.latest_order",
+    years: "-1",       // 전체 경력
+    category: String(JOB_CATEGORY),
+    limit: String(MAX_LISTINGS),
+    offset: "0",
+  });
 
-  // 무한 스크롤 — 충분한 공고가 로드될 때까지 스크롤
-  await autoScroll(page, MAX_LISTINGS);
+  const response = await fetch(`${LIST_API}?${params}`, { headers: HEADERS });
 
-  const cards = await page.$$eval(
-    'a[data-cy="job-card"]',
-    (anchors: HTMLAnchorElement[], max: number) =>
-      anchors.slice(0, max).map((a) => {
-        const base = "https://www.wanted.co.kr";
-        const href = a.getAttribute("href") ?? "";
-        const url = href.startsWith("http") ? href : base + href;
+  if (!response.ok) {
+    throw new Error(`원티드 목록 API 오류: ${response.status} ${response.statusText}`);
+  }
 
-        // 카드 내 텍스트 요소에서 포지션명과 회사명 추출
-        const texts = Array.from(a.querySelectorAll("strong, span")).map(
-          (el: Element) => el.textContent?.trim() ?? ""
-        );
-        const position = texts[0] ?? "";
-        const company = texts[1] ?? "";
-
-        return { url, company, position };
-      }),
-    MAX_LISTINGS
-  );
-
-  await page.close();
-
-  return cards
-    .filter((c) => c.url && c.company && c.position)
-    .map((c) => ({ ...c, source: "wanted" as const }));
+  const json = (await response.json()) as WantedListResponse;
+  return json.data ?? [];
 }
 
 /**
- * 공고 상세 페이지에서 JD 본문을 추출합니다.
+ * 공고 상세 API를 호출하여 JD 본문을 추출합니다.
  */
-async function fetchJobDetail(
-  browser: Browser,
-  url: string
-): Promise<string | null> {
-  const page = await browser.newPage();
-  try {
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
-    await page.waitForTimeout(PAGE_LOAD_WAIT_MS);
+async function fetchJobDetail(jobId: number): Promise<string | null> {
+  const response = await fetch(`${LIST_API}/${jobId}`, { headers: HEADERS });
 
-    // 원티드 상세 페이지 JD 컨테이너 선택자
-    const jd = await page.$eval(
-      ".JobDescription_JobDescription__VWfcb, [class*='JobDescription']",
-      (el) => el.textContent?.trim() ?? null
-    ).catch(() => null);
-
-    return jd;
-  } finally {
-    await page.close();
+  if (!response.ok) {
+    console.warn(`[원티드] 상세 조회 실패 (id: ${jobId}): ${response.status}`);
+    return null;
   }
+
+  const json = (await response.json()) as WantedDetailResponse;
+  const detail = json.job?.detail;
+  if (!detail) return null;
+
+  // 주요 JD 섹션을 하나의 텍스트로 합칩니다
+  return [
+    detail.intro && `[회사 소개]\n${detail.intro}`,
+    detail.main_tasks && `[주요 업무]\n${detail.main_tasks}`,
+    detail.requirements && `[자격 요건]\n${detail.requirements}`,
+    detail.preferred_points && `[우대 사항]\n${detail.preferred_points}`,
+    detail.benefits && `[혜택 및 복지]\n${detail.benefits}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n") || null;
 }
 
-/**
- * 무한 스크롤 페이지에서 maxItems개 이상의 카드가 렌더링될 때까지 스크롤합니다.
- */
-async function autoScroll(page: Page, maxItems: number): Promise<void> {
-  let prevCount = 0;
-  const MAX_ATTEMPTS = 10;
-
-  for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    const count = await page.$$eval(
-      'a[data-cy="job-card"]',
-      (els) => els.length
-    );
-    if (count >= maxItems) break;
-    if (count === prevCount) break; // 더 이상 로드 안 됨
-
-    prevCount = count;
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(1_500);
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

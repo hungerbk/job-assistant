@@ -27,10 +27,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-        working-directory: apps/crawler
-
       - name: Build shared package
         run: npm run build --workspace=packages/shared
 
@@ -45,10 +41,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          MY_CAREER_YEARS: ${{ vars.MY_CAREER_YEARS }}
-          MY_SKILLS: ${{ vars.MY_SKILLS }}
-          MY_PREFERRED_COMPANY_SIZE: ${{ vars.MY_PREFERRED_COMPANY_SIZE }}
-          MY_EXCLUDED_CONDITIONS: ${{ vars.MY_EXCLUDED_CONDITIONS }}
-          MY_MIN_SALARY: ${{ vars.MY_MIN_SALARY }}
           MY_JOB_CATEGORY: ${{ vars.MY_JOB_CATEGORY }}
           MATCH_SCORE_THRESHOLD: ${{ vars.MATCH_SCORE_THRESHOLD }}
