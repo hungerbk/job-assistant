@@ -59,10 +59,36 @@ JD: ${job.jd ?? "상세 내용 없음"}
 
 send는 score가 ${threshold} 이상일 때 true입니다.`;
 
-  const responseText = await sendMessage({
-    systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  });
+  return retryOnQuotaError(() =>
+    sendMessage({ systemPrompt, messages: [{ role: "user", content: userMessage }] })
+      .then((text) => parseJsonResponse<MatchResult>(text))
+  );
+}
 
-  return parseJsonResponse<MatchResult>(responseText);
+/**
+ * Gemini 429 (quota exceeded) 시 에러 메시지에 포함된 retryDelay만큼 기다린 뒤 재시도합니다.
+ * 최대 MAX_RETRIES회 재시도 후에도 실패하면 에러를 던집니다.
+ */
+async function retryOnQuotaError<T>(fn: () => Promise<T>, attempt = 0): Promise<T> {
+  const MAX_RETRIES = 3;
+  try {
+    return await fn();
+  } catch (err: unknown) {
+    const isQuota =
+      typeof err === "object" &&
+      err !== null &&
+      "status" in err &&
+      (err as { status: number }).status === 429;
+
+    if (!isQuota || attempt >= MAX_RETRIES) throw err;
+
+    // 에러 메시지에서 "retry in Xs" 파싱, 없으면 30초 대기
+    const message = err instanceof Error ? err.message : String(err);
+    const match = message.match(/retry in (\d+)/i);
+    const waitSec = match ? Number(match[1]) + 2 : 30;
+
+    console.warn(`[Gemini 429] ${waitSec}초 후 재시도 (${attempt + 1}/${MAX_RETRIES})...`);
+    await new Promise((r) => setTimeout(r, waitSec * 1000));
+    return retryOnQuotaError(fn, attempt + 1);
+  }
 }

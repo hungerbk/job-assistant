@@ -33,7 +33,9 @@ const HEADERS = {
 
 interface WantedListItem {
   id: number;
-  title: string;
+  title?: string;   // API 버전에 따라 name 또는 title 사용
+  name?: string;
+  position?: string;
   company: { name: string };
 }
 
@@ -68,10 +70,12 @@ export async function crawlWanted(): Promise<RawJobPosting[]> {
 
   for (const item of listings) {
     const jd = await fetchJobDetail(item.id);
+    // API 버전에 따라 title / name / position 중 하나에 값이 있음
+    const position = item.title ?? item.name ?? item.position ?? "(포지션명 없음)";
     results.push({
       url: `${BASE_URL}/wd/${item.id}`,
       company: item.company.name,
-      position: item.title,
+      position,
       jd,
       source: "wanted",
     });
