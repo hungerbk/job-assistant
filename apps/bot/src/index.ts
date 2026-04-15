@@ -1,11 +1,13 @@
 /**
  * Slack Bot 진입점
  *
+ * 서비스 1 연동: 공고 알림 버튼 액션 (관심 없음 / 면접 연습 / 자소서 작성)
  * 서비스 2: 면접 연습 (/interview, /end, /hint)
- * 서비스 3: 자소서 작성 (/coverletter, /analyze, /draft, /feedback)
+ * 서비스 3: 자소서 작성 (/coverletter, /analyze, /draft, /clfeedback)
  */
 import "dotenv/config";
 import { App } from "@slack/bolt";
+import { registerActionHandlers } from "./actions/handler";
 import { registerInterviewHandlers } from "./interview/handler";
 import { registerCoverletterHandlers } from "./resume/handler";
 
@@ -16,6 +18,9 @@ const app = new App({
   // socketMode: true,
   // appToken: process.env.SLACK_APP_TOKEN,
 });
+
+// 공고 알림 버튼 액션 핸들러 (서비스 1 → 2, 3 연결)
+registerActionHandlers(app);
 
 // 면접 연습 핸들러 등록
 registerInterviewHandlers(app);
