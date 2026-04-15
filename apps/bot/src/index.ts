@@ -10,6 +10,7 @@ import { App } from "@slack/bolt";
 import { registerActionHandlers } from "./actions/handler";
 import { registerInterviewHandlers } from "./interview/handler";
 import { registerCoverletterHandlers } from "./resume/handler";
+import { registerCSHandlers } from "./cs/handler";
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -27,6 +28,9 @@ registerInterviewHandlers(app);
 
 // 자소서 작성 핸들러 등록
 registerCoverletterHandlers(app);
+
+// CS 질문 핸들러 등록
+registerCSHandlers(app);
 
 (async () => {
   const port = Number(process.env.PORT) || 3000;
