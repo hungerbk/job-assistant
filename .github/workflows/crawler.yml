@@ -43,3 +43,4 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           MY_JOB_CATEGORY: ${{ vars.MY_JOB_CATEGORY }}
           MATCH_SCORE_THRESHOLD: ${{ vars.MATCH_SCORE_THRESHOLD }}
+          SARAMIN_API_KEY: ${{ secrets.SARAMIN_API_KEY }}

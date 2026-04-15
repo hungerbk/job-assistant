@@ -2,20 +2,24 @@
  * 채용 공고 수집 크롤러 진입점
  *
  * 실행 흐름:
- * 1. 각 사이트 크롤러 실행 (현재: 원티드)
- * 2. URL 해시 기반 중복 제거
- * 3. 제외 목록 필터링
- * 4. Gemini API로 매칭 점수 계산 (요청 사이 딜레이 적용)
- * 5. DB 저장
- * 6. 매칭 점수 >= 임계값이면 Slack 알림 발송 (이메일 알림은 추후 활성화)
+ * 1. 각 사이트 크롤러 실행 (원티드, 사람인, 잡코리아)
+ * 2. 크로스 플랫폼 중복 제거 (회사명 + 포지션명 기준)
+ * 3. URL 해시 기반 중복 제거
+ * 4. 제외 목록 필터링
+ * 5. Gemini API로 매칭 점수 계산 (요청 사이 딜레이 적용)
+ * 6. DB 저장
+ * 7. 매칭 점수 >= 임계값이면 Slack 알림 발송 (이메일 알림은 추후 활성화)
  */
 import "dotenv/config";
 import { getSupabaseClient, sleep, DEFAULT_RATE_LIMIT_DELAY_MS } from "@job-assistant/shared";
 import type { JobPosting } from "@job-assistant/shared";
 import { crawlWanted } from "./crawlers/wanted";
+import { crawlSaramin } from "./crawlers/saramin";
+import { crawlJobkorea } from "./crawlers/jobkorea";
 import { isDuplicate, hashUrl } from "./filter/dedup";
 import { isExcluded } from "./filter/exclude";
 import { calculateMatchScore } from "./filter/match";
+import { removeCrossplatformDuplicates } from "./filter/crossplatform";
 import { sendSlackNotification } from "./notify/slack";
 import type { RawJobPosting } from "./crawlers/types";
 
@@ -23,8 +27,12 @@ async function main(): Promise<void> {
   console.log("크롤러 시작...");
 
   // 1. 크롤링 실행
-  const rawJobs = await runCrawlers();
-  console.log(`총 ${rawJobs.length}개 공고 수집`);
+  const crawled = await runCrawlers();
+  console.log(`총 ${crawled.length}개 공고 수집 (중복 제거 전)`);
+
+  // 2. 크로스 플랫폼 중복 제거
+  const rawJobs = removeCrossplatformDuplicates(crawled);
+  console.log(`크로스 플랫폼 중복 제거 후: ${rawJobs.length}개`);
 
   let saved = 0;
   let notified = 0;
@@ -109,7 +117,11 @@ async function main(): Promise<void> {
  * 새 크롤러 추가 시 이 함수에만 추가하면 됩니다.
  */
 async function runCrawlers(): Promise<RawJobPosting[]> {
-  const results = await Promise.allSettled([crawlWanted()]);
+  const results = await Promise.allSettled([
+    crawlWanted(),
+    crawlSaramin(),
+    crawlJobkorea(),
+  ]);
 
   return results.flatMap((result) => {
     if (result.status === "fulfilled") return result.value;
