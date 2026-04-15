@@ -42,9 +42,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           MY_CAREER_YEARS: ${{ vars.MY_CAREER_YEARS }}
           MY_SKILLS: ${{ vars.MY_SKILLS }}
           MY_PREFERRED_COMPANY_SIZE: ${{ vars.MY_PREFERRED_COMPANY_SIZE }}

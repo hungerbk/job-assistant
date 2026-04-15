@@ -7,7 +7,7 @@
  * 3. 제외 목록 필터링
  * 4. Gemini API로 매칭 점수 계산 (요청 사이 딜레이 적용)
  * 5. DB 저장
- * 6. 매칭 점수 >= 임계값이면 Slack + 이메일 알림 발송
+ * 6. 매칭 점수 >= 임계값이면 Slack 알림 발송 (이메일 알림은 추후 활성화)
  */
 import "dotenv/config";
 import { getSupabaseClient, sleep, DEFAULT_RATE_LIMIT_DELAY_MS } from "@job-assistant/shared";
@@ -17,7 +17,6 @@ import { isDuplicate, hashUrl } from "./filter/dedup";
 import { isExcluded } from "./filter/exclude";
 import { calculateMatchScore } from "./filter/match";
 import { sendSlackNotification } from "./notify/slack";
-import { sendEmailNotification } from "./notify/email";
 import type { RawJobPosting } from "./crawlers/types";
 
 async function main(): Promise<void> {
@@ -120,21 +119,16 @@ async function runCrawlers(): Promise<RawJobPosting[]> {
 }
 
 /**
- * Slack + 이메일 알림을 발송합니다.
- * 어느 한쪽이 실패해도 나머지는 계속 시도합니다.
+ * Slack 알림을 발송합니다.
+ * TODO: 이메일 알림 활성화 시 notify/email.ts의 sendEmailNotification 추가
  */
 async function notify(
   job: RawJobPosting,
   match: Awaited<ReturnType<typeof calculateMatchScore>>
 ): Promise<void> {
-  await Promise.allSettled([
-    sendSlackNotification(job, match).catch((err) =>
-      console.error("[Slack 알림 실패]", err)
-    ),
-    sendEmailNotification(job, match).catch((err) =>
-      console.error("[이메일 알림 실패]", err)
-    ),
-  ]);
+  await sendSlackNotification(job, match).catch((err) =>
+    console.error("[Slack 알림 실패]", err)
+  );
 }
 
 main().catch((err) => {
