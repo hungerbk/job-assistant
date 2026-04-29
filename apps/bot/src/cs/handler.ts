@@ -81,7 +81,9 @@ export function registerCSHandlers(app: App): void {
   });
 
   // "답변 보기" 버튼 액션
-  // respond() 대신 client.chat.update() 사용 — response_url 만료/횟수 제한 우회
+  // "답변 보기" 버튼 액션
+  // 에페머럴 메시지: respond({ replace_original: true }) 사용 (chat.update 불가)
+  // 일반 메시지: chat.update 사용 (response_url 만료/횟수 제한 우회)
   app.action("cs_show_answer", async ({ body, ack, client, respond }) => {
     await ack();
 
@@ -99,23 +101,20 @@ export function registerCSHandlers(app: App): void {
         return;
       }
 
-      const channel = getChannelId(body);
-      const ts = getMessageTs(body);
+      const blocks = buildAnswerBlocks(question);
+      const text = `[${question.category}] ${question.question}`;
 
-      if (channel && ts) {
-        await client.chat.update({
-          channel,
-          ts,
-          blocks: buildAnswerBlocks(question),
-          text: `[${question.category}] ${question.question}`,
-        });
+      if (isEphemeral(body)) {
+        // 에페머럴 메시지는 chat.update 불가 → response_url로 교체
+        await respond({ replace_original: true, blocks, text });
       } else {
-        // channel/ts를 못 가져온 경우 respond로 폴백
-        await respond({
-          replace_original: true,
-          blocks: buildAnswerBlocks(question),
-          text: `[${question.category}] ${question.question}`,
-        });
+        const channel = getChannelId(body);
+        const ts = getMessageTs(body);
+        if (channel && ts) {
+          await client.chat.update({ channel, ts, blocks, text });
+        } else {
+          await respond({ replace_original: true, blocks, text });
+        }
       }
     } catch (err) {
       await notifyError("cs_show_answer", err);
@@ -137,22 +136,19 @@ export function registerCSHandlers(app: App): void {
 
       if (!question) return;
 
-      const channel = getChannelId(body);
-      const ts = getMessageTs(body);
+      const blocks = buildQuestionBlocks(question);
+      const text = `[${question.category}] ${question.question}`;
 
-      if (channel && ts) {
-        await client.chat.update({
-          channel,
-          ts,
-          blocks: buildQuestionBlocks(question),
-          text: `[${question.category}] ${question.question}`,
-        });
+      if (isEphemeral(body)) {
+        await respond({ replace_original: true, blocks, text });
       } else {
-        await respond({
-          replace_original: true,
-          blocks: buildQuestionBlocks(question),
-          text: `[${question.category}] ${question.question}`,
-        });
+        const channel = getChannelId(body);
+        const ts = getMessageTs(body);
+        if (channel && ts) {
+          await client.chat.update({ channel, ts, blocks, text });
+        } else {
+          await respond({ replace_original: true, blocks, text });
+        }
       }
     } catch (err) {
       await notifyError("cs_next_question", err);
@@ -272,4 +268,13 @@ function getMessageTs(
   body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
 ): string | null {
   return (body as { message?: { ts?: string } }).message?.ts ?? null;
+}
+
+function isEphemeral(
+  body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
+): boolean {
+  return (
+    (body as { container?: { is_ephemeral?: boolean } }).container
+      ?.is_ephemeral === true
+  );
 }
