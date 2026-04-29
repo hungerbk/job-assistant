@@ -18,9 +18,9 @@ import { crawlSaramin } from "./crawlers/saramin";
 import { crawlJobkorea } from "./crawlers/jobkorea";
 import { isDuplicate, hashUrl } from "./filter/dedup";
 import { isExcluded } from "./filter/exclude";
-import { calculateMatchScore } from "./filter/match";
+import { calculateMatchScore, DailyQuotaExceededError } from "./filter/match";
 import { removeCrossplatformDuplicates } from "./filter/crossplatform";
-import { sendSlackNotification } from "./notify/slack";
+import { sendSlackNotification, sendSlackAlert } from "./notify/slack";
 import type { RawJobPosting } from "./crawlers/types";
 
 async function main(): Promise<void> {
@@ -37,9 +37,14 @@ async function main(): Promise<void> {
   let saved = 0;
   let notified = 0;
   let skipped = 0;
+  let geminiCallCount = 0;
 
   const db = getSupabaseClient();
   const threshold = Number(process.env.MATCH_SCORE_THRESHOLD ?? 70);
+
+  // 셀프 리밋 — 일일 무료 할당량의 일부만 사용해 봇 서비스(/interview, /coverletter)용
+  // 호출분을 보존한다. (예: 1500 RPD × 90% / 하루 2회 = 675회/회 — 환경에 맞게 조정)
+  const maxRequestsPerRun = Number(process.env.GEMINI_REQUESTS_PER_RUN ?? 50);
 
   for (const job of rawJobs) {
     // 2. 중복 제거
@@ -56,12 +61,38 @@ async function main(): Promise<void> {
       continue;
     }
 
-    // 4. Gemini API 매칭 점수 계산 (배치 호출 사이 딜레이)
-    console.log(`[매칭 중] ${job.company} — ${job.position}`);
+    // 4. 셀프 리밋 — 봇 서비스용 할당량을 보존하기 위해 한도 도달 시 종료.
+    // 이미 처리된 공고의 Slack 알림은 루프 내에서 인라인으로 이미 발송되었으므로 손실 없음.
+    if (geminiCallCount >= maxRequestsPerRun) {
+      console.log(
+        `[중단] 이번 실행 호출 한도(${maxRequestsPerRun}회)에 도달. 봇 서비스용 할당량을 보존합니다.`
+      );
+      await sendSlackAlert(
+        `이번 실행의 Gemini 호출 한도(${maxRequestsPerRun}회)에 도달했습니다.\n` +
+          `진행 상황: 저장 ${saved}개, 알림 ${notified}개, 스킵 ${skipped}개.\n` +
+          `남은 일일 할당량은 봇 서비스(/interview, /coverletter)용으로 예약됩니다.`
+      );
+      break;
+    }
+
+    // 5. Gemini API 매칭 점수 계산 (배치 호출 사이 딜레이)
+    console.log(`[매칭 중] ${job.company} — ${job.position} (${geminiCallCount + 1}/${maxRequestsPerRun})`);
+    geminiCallCount++;
     let match;
     try {
       match = await calculateMatchScore(job);
     } catch (err) {
+      // 일일 할당량 소진 — 더 이상 처리해도 모두 실패하므로 즉시 전체 루프 중단.
+      // 분 단위 재시도로는 회복되지 않으므로 시간 낭비를 피한다.
+      if (err instanceof DailyQuotaExceededError) {
+        console.error(`[중단] ${err.message}`);
+        await sendSlackAlert(
+          `${err.message}\n\n` +
+            `진행 상황: 저장 ${saved}개, 알림 ${notified}개, 스킵 ${skipped}개.\n` +
+            `다음 일일 할당량 리셋 후 다시 실행되거나, 유료 플랜으로 업그레이드해 주세요.`
+        );
+        break;
+      }
       console.error(`[오류] 매칭 점수 계산 실패: ${job.url}`, err);
       await sleep(DEFAULT_RATE_LIMIT_DELAY_MS);
       continue;
@@ -108,7 +139,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `크롤러 완료 — 저장: ${saved}개, 알림: ${notified}개, 스킵: ${skipped}개`
+    `크롤러 완료 — 저장: ${saved}개, 알림: ${notified}개, 스킵: ${skipped}개, Gemini 호출: ${geminiCallCount}회`
   );
 }
 

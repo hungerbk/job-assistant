@@ -25,6 +25,27 @@ interface SlackPayload {
 }
 
 /**
+ * 크롤러 운영 알림(에러, 할당량 소진 등)을 Slack으로 발송합니다.
+ * SLACK_WEBHOOK_URL이 없으면 조용히 무시합니다.
+ */
+export async function sendSlackAlert(message: string): Promise<void> {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: `🚨 *크롤러 알림*\n${message}`,
+      }),
+    });
+  } catch (err) {
+    console.error("[Slack 알림 전송 실패]", err);
+  }
+}
+
+/**
  * 공고 알림 Slack 메시지를 발송합니다.
  * 환경변수 SLACK_WEBHOOK_URL이 필요합니다.
  */

@@ -66,8 +66,53 @@ send는 score가 ${threshold} 이상일 때 true입니다.`;
 }
 
 /**
+ * Gemini 일일 할당량(per-day quota)이 소진된 경우 발생시키는 전용 에러.
+ * 호출 측(크롤러 메인 루프)에서 이 에러를 catch하여 즉시 전체 실행을 중단해야 합니다.
+ * 일일 할당량은 분 단위 재시도로 회복되지 않으므로, 더 이상의 호출은 무의미합니다.
+ */
+export class DailyQuotaExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DailyQuotaExceededError";
+  }
+}
+
+/**
+ * Gemini 에러가 "일일 할당량 초과"인지 판별합니다.
+ * - errorDetails 배열의 QuotaFailure → violations[].quotaId에 "PerDay" 포함 여부 검사
+ * - 폴백: 메시지 문자열에서 "PerDay" 또는 "limit: 0" 패턴 검색
+ */
+function isDailyQuotaExceeded(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+
+  const details = (err as {
+    errorDetails?: Array<{ violations?: Array<{ quotaId?: string }> }>;
+  }).errorDetails;
+
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (
+        Array.isArray(detail.violations) &&
+        detail.violations.some(
+          (v) => typeof v.quotaId === "string" && v.quotaId.includes("PerDay")
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // errorDetails가 없는 환경(예: SDK 변경)을 위한 폴백
+  const message = err instanceof Error ? err.message : String(err);
+  return /PerDay/i.test(message) || /free_tier_requests.*limit:\s*0/i.test(message);
+}
+
+/**
  * Gemini 429 (quota exceeded) 시 에러 메시지에 포함된 retryDelay만큼 기다린 뒤 재시도합니다.
  * 최대 MAX_RETRIES회 재시도 후에도 실패하면 에러를 던집니다.
+ *
+ * 단, 일일 할당량(PerDay) 초과는 분 단위 재시도로 해결되지 않으므로
+ * DailyQuotaExceededError를 즉시 던져 호출 측에서 빠르게 중단할 수 있도록 합니다.
  */
 async function retryOnQuotaError<T>(fn: () => Promise<T>, attempt = 0): Promise<T> {
   const MAX_RETRIES = 3;
@@ -80,7 +125,16 @@ async function retryOnQuotaError<T>(fn: () => Promise<T>, attempt = 0): Promise<
       "status" in err &&
       (err as { status: number }).status === 429;
 
-    if (!isQuota || attempt >= MAX_RETRIES) throw err;
+    if (!isQuota) throw err;
+
+    // 일일 할당량 초과 → 재시도 무의미. 즉시 전용 에러로 변환하여 던짐.
+    if (isDailyQuotaExceeded(err)) {
+      throw new DailyQuotaExceededError(
+        "Gemini 일일 무료 할당량이 소진되었습니다. 크롤러를 중단합니다."
+      );
+    }
+
+    if (attempt >= MAX_RETRIES) throw err;
 
     // 에러 메시지에서 "retry in Xs" 파싱, 없으면 30초 대기
     const message = err instanceof Error ? err.message : String(err);

@@ -262,23 +262,13 @@ on:
 
 ### Gemini 무료 티어 요청 제한 대응
 
-Gemini 무료 티어는 분당 15회 요청 제한이 있어, 공고가 한 번에 많이 수집되면 오류가 발생할 수 있음.
-`packages/shared/gemini.ts`에 딜레이 유틸을 만들어서 모든 AI 호출에 적용할 것.
+Gemini 무료 티어는 분당 15회, 일일 약 1500회 요청 제한이 있어, 공고가 한 번에 많이 수집되거나 누적 호출이 많으면 오류가 발생할 수 있음.
 
-```typescript
-/**
- * Gemini 무료 티어의 분당 요청 제한(15회)을 초과하지 않도록
- * API 호출 사이에 딜레이를 추가합니다.
- *
- * @ai-change-point 유료 플랜 또는 다른 AI로 교체 시 이 딜레이를 제거하거나 줄일 것
- */
-const GEMINI_REQUEST_DELAY_MS = 4500; // 분당 15회 기준 여유있게 4.5초 간격
+**대응 전략 (3단계):**
 
-async function callWithDelay<T>(fn: () => Promise<T>): Promise<T> {
-  await new Promise((resolve) => setTimeout(resolve, GEMINI_REQUEST_DELAY_MS));
-  return fn();
-}
-```
+1. **분당 RPM 대응** — `packages/shared/gemini.ts`의 `DEFAULT_RATE_LIMIT_DELAY_MS`(4초)를 호출 사이에 삽입.
+2. **셀프 리밋** — `GEMINI_REQUESTS_PER_RUN` 환경변수로 1회 실행당 호출 한도를 설정. 일일 할당량의 일부(예: 90%)만 사용하고 남은 분량은 봇 서비스(/interview, /coverletter)용으로 예약. 한도 도달 시 즉시 종료 + Slack 알림.
+3. **일일 할당량 소진 감지** — 429 에러의 `errorDetails`에서 `PerDay` 위반을 감지하면 `DailyQuotaExceededError`로 즉시 중단(분 단위 재시도가 무의미하므로 시간 낭비 방지).
 
 ### 알림 포맷 (Slack)
 
