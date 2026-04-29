@@ -82,8 +82,6 @@ export function registerCSHandlers(app: App): void {
 
   // "답변 보기" 버튼 액션
   // "답변 보기" 버튼 액션
-  // 에페머럴 메시지: respond({ replace_original: true }) 사용 (chat.update 불가)
-  // 일반 메시지: chat.update 사용 (response_url 만료/횟수 제한 우회)
   app.action("cs_show_answer", async ({ body, ack, client, respond }) => {
     await ack();
 
@@ -104,19 +102,9 @@ export function registerCSHandlers(app: App): void {
       const blocks = buildAnswerBlocks(question);
       const text = `[${question.category}] ${question.question}`;
 
-      if (isEphemeral(body)) {
-        // 에페머럴 메시지는 chat.update 불가 → response_url로 교체
-        await respond({ replace_original: true, blocks, text });
-      } else {
-        const channel = getChannelId(body);
-        const ts = getMessageTs(body);
-        if (channel && ts) {
-          await client.chat.update({ channel, ts, blocks, text });
-        } else {
-          await respond({ replace_original: true, blocks, text });
-        }
-      }
+      await updateMessage({ body, client, respond, blocks, text });
     } catch (err) {
+      console.error("[CS] cs_show_answer 오류:", err);
       await notifyError("cs_show_answer", err);
       await respond("답변을 불러오는 중 오류가 발생했습니다.").catch(() => {});
     }
@@ -139,18 +127,9 @@ export function registerCSHandlers(app: App): void {
       const blocks = buildQuestionBlocks(question);
       const text = `[${question.category}] ${question.question}`;
 
-      if (isEphemeral(body)) {
-        await respond({ replace_original: true, blocks, text });
-      } else {
-        const channel = getChannelId(body);
-        const ts = getMessageTs(body);
-        if (channel && ts) {
-          await client.chat.update({ channel, ts, blocks, text });
-        } else {
-          await respond({ replace_original: true, blocks, text });
-        }
-      }
+      await updateMessage({ body, client, respond, blocks, text });
     } catch (err) {
+      console.error("[CS] cs_next_question 오류:", err);
       await notifyError("cs_next_question", err);
     }
   });
@@ -250,6 +229,51 @@ function buildAnswerBlocks(q: CSQuestion) {
 // ---------------------------------------------------------------------------
 // 내부 유틸리티
 // ---------------------------------------------------------------------------
+
+type ActionBody = Parameters<Parameters<App["action"]>[1]>[0]["body"];
+type ActionClient = Parameters<Parameters<App["action"]>[1]>[0]["client"];
+type ActionRespond = Parameters<Parameters<App["action"]>[1]>[0]["respond"];
+
+/**
+ * 에페머럴/일반 메시지 여부에 따라 메시지 업데이트 방식을 결정합니다.
+ *
+ * - 에페머럴: respond({ replace_original }) → 실패 시 postEphemeral 폴백
+ * - 일반 메시지: chat.update → 실패 시 respond 폴백
+ */
+async function updateMessage(params: {
+  body: ActionBody;
+  client: ActionClient;
+  respond: ActionRespond;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  blocks: any[];
+  text: string;
+}): Promise<void> {
+  const { body, client, respond, blocks, text } = params;
+
+  if (isEphemeral(body)) {
+    // 에페머럴 메시지는 chat.update 불가.
+    // respond()로 원본 교체를 시도하고, 실패 시 새 에페머럴 메시지로 폴백.
+    try {
+      await respond({ replace_original: true, blocks, text });
+    } catch (respondErr) {
+      console.warn("[CS] respond() 실패, postEphemeral로 폴백:", respondErr);
+      const channel = getChannelId(body);
+      const userId = (body as { user?: { id?: string } }).user?.id;
+      if (channel && userId) {
+        await client.chat.postEphemeral({ channel, user: userId, blocks, text });
+      }
+    }
+  } else {
+    // 일반 메시지: chat.update (response_url 횟수 제한 없음)
+    const channel = getChannelId(body);
+    const ts = getMessageTs(body);
+    if (channel && ts) {
+      await client.chat.update({ channel, ts, blocks, text });
+    } else {
+      await respond({ replace_original: true, blocks, text });
+    }
+  }
+}
 
 function getActionValue(
   body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
