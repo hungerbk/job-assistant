@@ -40,11 +40,12 @@ async function main(): Promise<void> {
   let geminiCallCount = 0;
 
   const db = getSupabaseClient();
-  const threshold = Number(process.env.MATCH_SCORE_THRESHOLD ?? 70);
+  const threshold = Number(process.env.MATCH_SCORE_THRESHOLD || "70");
 
   // 셀프 리밋 — 일일 무료 할당량의 일부만 사용해 봇 서비스(/interview, /coverletter)용
   // 호출분을 보존한다. (예: 1500 RPD × 90% / 하루 2회 = 675회/회 — 환경에 맞게 조정)
-  const maxRequestsPerRun = Number(process.env.GEMINI_REQUESTS_PER_RUN ?? 50);
+  // ?? 대신 || 사용: GitHub Actions에서 미설정 변수는 빈 문자열("")로 전달되며 Number("") = 0이 되는 버그 방지
+  const maxRequestsPerRun = Number(process.env.GEMINI_REQUESTS_PER_RUN || "50");
 
   for (const job of rawJobs) {
     // 2. 중복 제거

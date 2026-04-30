@@ -37,7 +37,7 @@ function loadProfile(): string {
  */
 export async function calculateMatchScore(job: RawJobPosting): Promise<MatchResult> {
   const profile = loadProfile();
-  const threshold = Number(process.env.MATCH_SCORE_THRESHOLD ?? 70);
+  const threshold = Number(process.env.MATCH_SCORE_THRESHOLD || "70");
 
   const systemPrompt = "당신은 채용 공고 매칭 전문가입니다.";
 
