@@ -235,10 +235,13 @@ type ActionClient = Parameters<Parameters<App["action"]>[1]>[0]["client"];
 type ActionRespond = Parameters<Parameters<App["action"]>[1]>[0]["respond"];
 
 /**
- * 에페머럴/일반 메시지 여부에 따라 메시지 업데이트 방식을 결정합니다.
+ * 메시지를 업데이트합니다. 세 가지 방법을 순차적으로 시도합니다.
  *
- * - 에페머럴: respond({ replace_original }) → 실패 시 postEphemeral 폴백
- * - 일반 메시지: chat.update → 실패 시 respond 폴백
+ * 1. respond({ replace_original }) — ephemeral/non-ephemeral 모두 지원
+ * 2. client.chat.update — respond 실패 시, channel+ts가 있는 일반 메시지용
+ * 3. client.chat.postEphemeral — 위 두 방법 모두 실패 시 새 에페머럴 전송
+ *
+ * isEphemeral 분기 없이 순차 시도하여 body.container 구조 차이에 강건하게 동작합니다.
  */
 async function updateMessage(params: {
   body: ActionBody;
@@ -249,30 +252,37 @@ async function updateMessage(params: {
   text: string;
 }): Promise<void> {
   const { body, client, respond, blocks, text } = params;
+  const channel = getChannelId(body);
+  const ts = getMessageTs(body);
+  const userId = (body as { user?: { id?: string } }).user?.id;
 
-  if (isEphemeral(body)) {
-    // 에페머럴 메시지는 chat.update 불가.
-    // respond()로 원본 교체를 시도하고, 실패 시 새 에페머럴 메시지로 폴백.
+  // 1. respond(replace_original) — response_url 기반, ephemeral·non-ephemeral 공통 지원
+  try {
+    await respond({ replace_original: true, blocks, text });
+    return;
+  } catch (e) {
+    console.warn("[CS] respond(replace_original) 실패:", (e as Error).message);
+  }
+
+  // 2. chat.update — 일반 메시지에서 채널·ts를 알 때
+  if (channel && ts) {
     try {
-      await respond({ replace_original: true, blocks, text });
-    } catch (respondErr) {
-      console.warn("[CS] respond() 실패, postEphemeral로 폴백:", respondErr);
-      const channel = getChannelId(body);
-      const userId = (body as { user?: { id?: string } }).user?.id;
-      if (channel && userId) {
-        await client.chat.postEphemeral({ channel, user: userId, blocks, text });
-      }
-    }
-  } else {
-    // 일반 메시지: chat.update (response_url 횟수 제한 없음)
-    const channel = getChannelId(body);
-    const ts = getMessageTs(body);
-    if (channel && ts) {
       await client.chat.update({ channel, ts, blocks, text });
-    } else {
-      await respond({ replace_original: true, blocks, text });
+      return;
+    } catch (e) {
+      console.warn("[CS] chat.update 실패:", (e as Error).message);
     }
   }
+
+  // 3. postEphemeral — 새 에페머럴 메시지로 폴백
+  if (channel && userId) {
+    await client.chat.postEphemeral({ channel, user: userId, blocks, text });
+    return;
+  }
+
+  throw new Error(
+    `메시지 업데이트 방법을 모두 소진했습니다 (channel=${channel}, ts=${ts}, userId=${userId})`
+  );
 }
 
 function getActionValue(
@@ -292,13 +302,4 @@ function getMessageTs(
   body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
 ): string | null {
   return (body as { message?: { ts?: string } }).message?.ts ?? null;
-}
-
-function isEphemeral(
-  body: Parameters<Parameters<App["action"]>[1]>[0]["body"]
-): boolean {
-  return (
-    (body as { container?: { is_ephemeral?: boolean } }).container
-      ?.is_ephemeral === true
-  );
 }
