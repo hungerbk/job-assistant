@@ -100,8 +100,9 @@ export async function crawlWanted(): Promise<RawJobPosting[]> {
     }
     consecutiveDuplicates = 0; // 새 공고 발견 시 카운터 리셋
 
-    const jd = await fetchJobDetail(item.id);
-    const position = item.title ?? item.name ?? item.position ?? "(포지션명 없음)";
+    const { title: detailTitle, jd } = await fetchJobDetail(item.id);
+    // 목록 API에 title/name이 없는 경우 상세 API의 title로 보완
+    const position = item.title ?? item.name ?? item.position ?? detailTitle ?? "(포지션명 없음)";
 
     results.push({ url, company: item.company.name, position, jd, source: "wanted" });
     await sleep(REQUEST_DELAY_MS);
@@ -138,21 +139,22 @@ async function fetchListings(): Promise<WantedListItem[]> {
 }
 
 /**
- * 공고 상세 API를 호출하여 JD 본문을 추출합니다.
+ * 공고 상세 API를 호출하여 포지션명과 JD 본문을 추출합니다.
  */
-async function fetchJobDetail(jobId: number): Promise<string | null> {
+async function fetchJobDetail(jobId: number): Promise<{ title: string | null; jd: string | null }> {
   const response = await fetch(`${LIST_API}/${jobId}`, { headers: HEADERS });
 
   if (!response.ok) {
     console.warn(`[원티드] 상세 조회 실패 (id: ${jobId}): ${response.status}`);
-    return null;
+    return { title: null, jd: null };
   }
 
   const json = (await response.json()) as WantedDetailResponse;
+  const title = json.job?.title ?? null;
   const detail = json.job?.detail;
-  if (!detail) return null;
+  if (!detail) return { title, jd: null };
 
-  return [
+  const jd = [
     detail.intro && `[회사 소개]\n${detail.intro}`,
     detail.main_tasks && `[주요 업무]\n${detail.main_tasks}`,
     detail.requirements && `[자격 요건]\n${detail.requirements}`,
@@ -161,6 +163,8 @@ async function fetchJobDetail(jobId: number): Promise<string | null> {
   ]
     .filter(Boolean)
     .join("\n\n") || null;
+
+  return { title, jd };
 }
 
 function sleep(ms: number): Promise<void> {
