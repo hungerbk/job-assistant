@@ -111,29 +111,32 @@ export function registerCSHandlers(app: App): void {
     }
   });
 
-  // "다음 문제" 버튼 액션
-  app.action("cs_next_question", async ({ body, ack, client, respond }) => {
-    await ack();
+  // "다음 문제" / "다른 카테고리" 버튼 액션
+  // cs_random_question은 action_id 중복 방지를 위해 분리 (같은 로직)
+  for (const actionId of ["cs_next_question", "cs_random_question"] as const) {
+    app.action(actionId, async ({ body, ack, client, respond }) => {
+      await ack();
 
-    try {
-      const value = getActionValue(body) as CSCategory | "random" | null;
+      try {
+        const value = getActionValue(body) as CSCategory | "random" | null;
 
-      const pool = getQuestionsByCategory(
-        value && value !== "random" ? value : undefined
-      );
-      const question = pickRandom(pool);
+        const pool = getQuestionsByCategory(
+          value && value !== "random" ? value : undefined
+        );
+        const question = pickRandom(pool);
 
-      if (!question) return;
+        if (!question) return;
 
-      const blocks = buildQuestionBlocks(question);
-      const text = `[${question.category}] ${question.question}`;
+        const blocks = buildQuestionBlocks(question);
+        const text = `[${question.category}] ${question.question}`;
 
-      await updateMessage({ body, client, respond, blocks, text });
-    } catch (err) {
-      console.error("[CS] cs_next_question 오류:", err);
-      await notifyError("cs_next_question", err);
-    }
-  });
+        await updateMessage({ body, client, respond, blocks, text });
+      } catch (err) {
+        console.error(`[CS] ${actionId} 오류:`, err);
+        await notifyError(actionId, err);
+      }
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +222,7 @@ function buildAnswerBlocks(q: CSQuestion) {
         {
           type: "button",
           text: { type: "plain_text", text: "다른 카테고리", emoji: true },
-          action_id: "cs_next_question",
+          action_id: "cs_random_question",
           value: "random",
         },
       ],
