@@ -104,9 +104,10 @@ export function registerCSHandlers(app: App): void {
 
       await updateMessage({ body, client, respond, blocks, text });
     } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
       console.error("[CS] cs_show_answer 오류:", err);
       await notifyError("cs_show_answer", err);
-      await respond("답변을 불러오는 중 오류가 발생했습니다.").catch(() => {});
+      await respond(`답변을 불러오는 중 오류가 발생했습니다.\n\`${detail}\``).catch(() => {});
     }
   });
 
